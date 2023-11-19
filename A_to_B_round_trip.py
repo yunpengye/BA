@@ -1,6 +1,10 @@
 #Goal: Go from Positon A to Position B. Land, disarm, arm, takeoff, back to Position A. 
 #yunpye@ethz.ch 
 import asyncio
+import argparse
+parser = argparse.ArgumentParser()
+parser.parse_args()
+
 from mavsdk import System
 async def altitude_takeoff(drone):
     position = await drone.telemetry.position().__aiter__().__anext__()
@@ -8,7 +12,7 @@ async def altitude_takeoff(drone):
     altitude_takeoff = altitude_current
     return altitude_takeoff
 
-async def takeoff_altitude(drone,altitude):
+async def takeoff_altitude(drone,altitude,tolerance):
     print("--- Taking Off to Altitude of", altitude, "meter")
     n=0
 
@@ -16,17 +20,17 @@ async def takeoff_altitude(drone,altitude):
     altitude_current = position.absolute_altitude_m
     altitude_takeoff_A = altitude_current
     print("--- Current Altitude:", altitude_current, "meter")
-    while altitude-altitude_current>0.01:
+    while altitude-altitude_current>tolerance:
         position = await drone.telemetry.position().__aiter__().__anext__()
         altitude_current = position.absolute_altitude_m
         await drone.action.takeoff()
         
-        if (n % 100==0):
-            print("--- Current Altitude:", altitude_current, "meter")
+        if (n % 50==0):
+            print("---- Current Altitude:", altitude_current, "meter")
 
         n=n+1    
 
-async def goto_position(drone,latitude,longitude,altitude):
+async def goto_position(drone,latitude,longitude,altitude,tolerance):
     print("--- Going to the Position ", latitude, " ,",longitude)
     
     n=0
@@ -34,16 +38,16 @@ async def goto_position(drone,latitude,longitude,altitude):
     latitude_current = position.latitude_deg
     longitude_current = position.longitude_deg
     print("--- Current Location:", latitude_current, " ,",longitude_current)
-    while abs(longitude-longitude_current)>0.0000001 and abs(latitude-latitude_current)>0.0000001:
+    while abs(longitude-longitude_current)>tolerance and abs(latitude-latitude_current)>tolerance:
         position = await drone.telemetry.position().__aiter__().__anext__()
         latitude_current = position.latitude_deg
         longitude_current = position.longitude_deg
         await drone.action.goto_location(latitude, longitude, altitude, 0) ##change to the local coordinates at some point
         
         if (n % 100==0):
-            print("--- Current Location:", latitude_current, " ,",longitude_current)
+            print("---- Current Location:", latitude_current, " ,",longitude_current)
 
-        n=n+1     # needs to be substitute by do-while loop
+        n=n+1    
 
 async def landing_position(drone,yaw_deg):
     #Yaw angle (in degrees, frame is NED, 0 is North, positive is clockwise)
@@ -60,7 +64,7 @@ async def landing_position(drone,yaw_deg):
         await drone.action.land()
         
         if (n % 1==0):
-            print("--- Current Altitude:", altitude_current, "meter")
+            print("---- Current Altitude:", altitude_current, "meter")
 
         n=n+1    
     
@@ -83,71 +87,54 @@ async def run():
                altitude = round(position.relative_altitude_m)
                print(f"Altitude: {altitude}")
                break
-               #position_takeoff = drone.telemetry.position()
-               #print(position_takeoff)
             break
 
     print("Fetching amsl altitude at home location....")
     async for terrain_info in drone.telemetry.home():
-        absolute_altitude = terrain_info.absolute_altitude_m
+        absolute_altitude_home = terrain_info.absolute_altitude_m
+        latitude_home = terrain_info.latitude_deg
+        longitude_home = terrain_info.longitude_deg
+        print("-- Home Location Absolute Altitude =",absolute_altitude_home,"Meter -- Home Location Latitude =",latitude_home,"Degree -- Home Location Longitude =",longitude_home, "Degree")
         break
-
+    
     print("-- Arming")
     await drone.action.arm()
 
     altitude_takeoff_A = await altitude_takeoff(drone)
     print("Takeoff Altitude at Point A = ",altitude_takeoff_A," Meter" )
-    # print("--- Taking Off")
-    # await drone.action.takeoff()
-    await takeoff_altitude(drone,500)
-    ##breaking things up with telemetry.position into robust routines takeoff, goto_positon_A, landing at position_A 
-    ##set the yaw angle while landing. landing with a specific angle.
-    # await asyncio.sleep(10)
 
-    # To fly drone 20m above the ground plane
-    #flying_alt = absolute_altitude + 20.0
+    #### parameters
+    altitude_cruise = 510 ##substitute later by parsing argument
+    print("--Cruise Altitude =",altitude_cruise,"Meter")
 
-    await goto_position(drone, 47.397606, 8.543060, 500)
+    latitude_target = 47.397606 ##substitute later by parsing argument
+    longitude_target = 8.543060 ##substitute later by parsing argument
+    print("--Target Position: Latitude=",latitude_target, "Degree, Longitude=", longitude_target, "Degree")
 
-    # goto_location() takes Absolute MSL altitude
-    ###substitute with telemetry.position and a loop?
+    tolerance_position = 0.0000001 ##substitute later by parsing argument
+    print("Position Tolerance=",tolerance_position)
+
+    tolerance_altitude = 0 ##substitute later by parsing argument
+    print("Altitude Tolerance=",tolerance_altitude)
+ 
+    yaw_angle_landing_target = 123 ##substitute later by parsing argument
+    print("Yaw Angle while Landing at Target = ", yaw_angle_landing_target, "Degree")
+
+    await takeoff_altitude(drone,altitude_cruise,tolerance_altitude)
+
+    await goto_position(drone, latitude_target, longitude_target, altitude_cruise, tolerance_position)
     
-    
-    ####substitute with for/break? 
-    await landing_position(drone, 123)
-    # print("-- Landing")
-    # await drone.action.land()
-    # await asyncio.sleep(30)
-    
-    #await drone.action.disarm()
-    #print("Drone disarmed.")
-    #await asyncio.sleep(10)
+    await landing_position(drone, yaw_angle_landing_target)
     
     print("-- Arming")
     await drone.action.arm()
     
-    # print("--- Taking Off")
-    # await drone.action.takeoff()
-    await takeoff_altitude(drone,500)    
+    await takeoff_altitude(drone,altitude_cruise,tolerance_altitude)    
 
-    #await asyncio.sleep(10)
-    # To fly drone 20m above the ground plane
-    #flying_alt = absolute_altitude + 20.0
-    # goto_location() takes Absolute MSL altitude
-    #await drone.action.goto_location(47.397744, 8.545625, flying_alt, 0)
-    #await asyncio.sleep(50)
-    await goto_position(drone, 47.397744, 8.545625, 500)
+    await goto_position(drone, latitude_home, longitude_home, altitude_cruise,tolerance_position)
     
-    # print("-- Landing")
-    # await drone.action.land()
-    # await asyncio.sleep(30)
-    await landing_position(drone, 123)
+    await landing_position(drone, yaw_angle_landing_target)
     
-    
-    
-    #await drone.action.return_to_launch()
-    #print("--- Return to Launch")
-
 if __name__ == "__main__":
     asyncio.run(run())
     
